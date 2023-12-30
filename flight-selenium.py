@@ -1,11 +1,21 @@
+import mysql.connector
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 import pandas as pd
 import datetime
 import time
 
+mydb = mysql.connector.connect(
+        host='localhost',
+        user='USERNAME',
+        password='PASSWORD',
+        database='google_flight'
+)
+
+CURRENT_DATE = datetime.datetime.now().strftime("%Y-%m-%d")
+
+mycursor = mydb.cursor()
 
 def scrape(departure_city, arrival_city, date_leave, date_return, max_retries=3):
     retries = 0
@@ -41,6 +51,15 @@ def scrape(departure_city, arrival_city, date_leave, date_return, max_retries=3)
                 if price == 'Price unavailable':
                     price = ' N/A'
                 all_prices.append(price[1:])
+
+                # Insert data into MySQL:
+                sql = """INSERT INTO flights (departure, arrival, date_leave, date_return, 
+                depart_time, arrive_time, company, price, scraping_date) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                val = (departure_city, arrival_city, date_leave, date_return, departure_time,
+                       arrival_time, company, price, CURRENT_DATE)
+                mycursor.execute(sql, val)
+
             except Exception as e:
                 print(f"Exception: {e}")
                 continue
@@ -59,6 +78,8 @@ def scrape(departure_city, arrival_city, date_leave, date_return, max_retries=3)
                 'Company': all_companies,
                 'Price': all_prices
             })
+
+            mydb.commit()
             print(f'Finish scraping for {departure_city},{arrival_city},{date_leave},{date_return}')
             return flights_df
         else:
@@ -96,29 +117,21 @@ def convert_time(time_str):
 results = []
 
 # Define the date combinations you want to scrape
-date_combinations = [
-    ('2024-02-05', '2024-02-16'),
-    ('2024-02-05', '2024-02-17'),
-    ('2024-02-05', '2024-02-18'),
-    ('2024-02-06', '2024-02-16'),
-    ('2024-02-06', '2024-02-17'),
-    ('2024-02-06', '2024-02-18'),
-    ('2024-02-07', '2024-02-16'),
-    ('2024-02-07', '2024-02-17'),
-    ('2024-02-07', '2024-02-18')
-]
+date_leave = ['2024-02-05', '2024-02-06', '2024-02-07']
+date_return = ['2024-02-16', '2024-02-17', '2024-02-18']
 
 # Perform the scrapes and store the results in the list
-for date_leave, date_return in date_combinations:
-    result = scrape('HCM', 'HAN', date_leave, date_return)
-    results.append(result)
+for dl in date_leave:
+    for dr in date_return:
+        result = scrape('HCM', 'HAN', dl, dr)
+        results.append(result)
 
 # Concatenate all the results into a single DataFrame
 final_df = pd.concat(results, ignore_index=True)
 
-# Add the current date to the file name
-current_date = datetime.datetime.now().strftime("%Y-%m-%d")
-file_name = f"/Users/marcusle02/Documents/Learning/google_flight_etl/RT Flight Data/flight_data_{current_date}.csv"
+# Add the current date column to the file and file name
+final_df['Scraping Date'] = CURRENT_DATE
+file_name = f"/Users/marcusle02/Documents/Learning/google_flight_etl/RT Flight Data/flight_data_v2_{CURRENT_DATE}.csv"
 
 # Save the concatenated file as a CSV file
 final_df.to_csv(file_name, index=False, encoding='utf-8')
